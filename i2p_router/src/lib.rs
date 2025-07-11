@@ -32,7 +32,7 @@ use crate::{
 
 use anyhow::anyhow;
 use clap::Parser;
-use emissary_core::{events::EventSubscriber, router::Router};
+use emissary_core::{crypto::base64_encode, events::EventSubscriber, router::Router};
 use emissary_util::{reseeder::Reseeder, runtime::tokio::Runtime, su3::ReseedRouterInfo};
 use futures::{channel::oneshot, StreamExt};
 use tokio::sync::mpsc::{channel, Receiver};
@@ -181,6 +181,8 @@ pub async fn setup_router() -> anyhow::Result<RouterContext> {
 	let server_tunnels = mem::take(&mut config.server_tunnels);
 	let router_ui_config = config.router_ui.clone();
 
+	let static_key = base64_encode(&config.static_key.clone().to_vec());
+	tracing::info!("static_key: {:?}", static_key);
 	let (router, events, local_router_info, address_book_manager) =
 		match config.address_book.take() {
 			None => Router::<Runtime>::new(config.into(), None, Some(Arc::new(storage)))
@@ -242,10 +244,15 @@ pub async fn setup_router() -> anyhow::Result<RouterContext> {
 					address.port(),
 					http_proxy_ready_tx,
 					address_book_handle,
+					yosemite::DestinationKind::Persistent {
+						private_key: "gXH3nq37-v4lZ2xDQAt3Cp4buoJBJyjfI4hQnCXCfQBESbVjPg~7A7Qs-7rE5Erc1~NQYVeReoHs-q4aOjrxUJfqsPisLqkocfiwoCdV3Sndtocf6okL1r0Ib7e~1veHR6T~Oq4gsfg3R~5UyGk3k8ZTNetzxoCrCbqNuHlkxU9ZFlV525fcj74tGrPvbO~X-q2imSv1E9cFDDFmDtPoY8xR~dm5YlaWMsvLa6nzVnr0geM2J7f0a4jFDmxSXDM6IicRk3hHVjLpL5h4ILdjtaxU3j1tUQbNF6zLTb5Wmv2BBXlYN~izlTqIwuUXvO8WbkjE3xHnqQyNLYIkTg6HnOJgli58vfJu7PuA~q3eCGmH6ObnfPl-uwGhPIGs3YizD0czbk6W97LTjbvRGPMpiuTd2a6wC0AipFfwaHlgchhLq-7o2J4DPy1UP3nY9NxgJLlnu6-rMErAS~gXfojQHaksQkpNcmFnC4pDYupLEtgyyqcATJrhrE11~CJZmqS-BQAEAAcAAANDePvG4ue~ABkSwQ9-a5~Oa9pK7U86jFU8l2W20JN6e3g~fe6AdzmCM~SVkpKo5xHeg60RHjVcGbV6eNsCeRU=".to_string(),
+					},
+					// yosemite::DestinationKind::Transient,
 				)
 				.await
 				{
 					Ok(proxy) => {
+						println!("xxxxxxxxxxx------------HttpProxy::session_created");
 						if let Err(error) = proxy.run().await {
 							tracing::debug!(
 								target: LOG_TARGET,

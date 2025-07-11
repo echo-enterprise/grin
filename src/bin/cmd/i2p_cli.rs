@@ -20,10 +20,14 @@
 #![allow(clippy::too_many_arguments)]
 
 use i2p_router::{router_event_loop, setup_router, ui::web::RouterUi, RouterContext};
+use std::sync::OnceLock;
 use tokio::sync::mpsc::{channel, Receiver};
 
+static RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
+
 pub fn start_i2p_router() -> anyhow::Result<()> {
-	let runtime = tokio::runtime::Runtime::new()?;
+	let runtime =
+		RUNTIME.get_or_init(|| tokio::runtime::Runtime::new().expect("Failed to create runtime"));
 	let (shutdown_tx, shutdown_rx) = channel(1);
 	let RouterContext {
 		router,
@@ -32,12 +36,19 @@ pub fn start_i2p_router() -> anyhow::Result<()> {
 		router_ui_config,
 	} = runtime.block_on(setup_router())?;
 
+	// Spawn the UI task (infinite loop)
 	runtime.spawn(async move {
 		RouterUi::new(events, Some(7657), 5, shutdown_tx)
 			.run()
 			.await;
 	});
-	// runtime.block_on(router_event_loop(router, port_mapper, shutdown_rx));
 
+	// Spawn the router event loop task (infinite loop)
+	runtime.spawn(async move {
+		router_event_loop(router, port_mapper, shutdown_rx).await;
+	});
+
+	// Return immediately, letting both tasks run in the background
+	// The runtime will stay alive because it's stored in the static variable
 	Ok(())
 }

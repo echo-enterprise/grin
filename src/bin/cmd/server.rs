@@ -46,7 +46,21 @@ pub fn start_server(
 	}
 	warn!("start_server_2222222222222");
 	// start grin server here
-	start_server_tui(config, logs_rx, api_chan);
+	// start_server_tui(config, logs_rx, api_chan);
+
+	// Infinite loop with Ctrl+C exit handling
+	let running = Arc::new(AtomicBool::new(true));
+	let r = running.clone();
+	ctrlc::set_handler(move || {
+		r.store(false, Ordering::SeqCst);
+	})
+	.expect("Error setting handler for both SIGINT (Ctrl+C) and SIGTERM (kill)");
+
+	warn!("Server running. Press Ctrl+C to exit.");
+	while running.load(Ordering::SeqCst) {
+		thread::sleep(Duration::from_secs(1));
+	}
+	warn!("Received SIGINT (Ctrl+C) or SIGTERM (kill). Shutting down...");
 
 	exit(0);
 }

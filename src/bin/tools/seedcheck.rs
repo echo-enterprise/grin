@@ -26,12 +26,18 @@ use std::time::Duration;
 
 use thiserror::Error;
 
+// Add yosemite dependency for I2P communication
+use tokio;
+use yosemite::{style, Session, SessionOptions, StreamOptions};
+
 #[derive(Error, Debug)]
 pub enum SeedCheckError {
 	#[error("Seed Connect Error {0}")]
 	SeedConnectError(String),
 	#[error("Grin Store Error {0}")]
 	StoreError(String),
+	#[error("I2P Error {0}")]
+	I2PError(String),
 }
 
 impl From<p2p::Error> for SeedCheckError {
@@ -43,6 +49,12 @@ impl From<p2p::Error> for SeedCheckError {
 impl From<grin_store::lmdb::Error> for SeedCheckError {
 	fn from(e: grin_store::lmdb::Error) -> Self {
 		SeedCheckError::StoreError(format!("{:?}", e))
+	}
+}
+
+impl From<yosemite::Error> for SeedCheckError {
+	fn from(e: yosemite::Error) -> Self {
+		SeedCheckError::I2PError(format!("{:?}", e))
 	}
 }
 
@@ -205,5 +217,272 @@ fn check_seed_health(
 			);
 			Err(p2p::Error::Connection(e).into())
 		}
+	}
+}
+
+/// Check seed health over I2P network
+///
+/// This function attempts to connect to a seed node over I2P using the yosemite crate.
+/// It creates an I2P session and attempts to establish a connection to the given destination.
+///
+/// # Arguments
+/// * `destination` - The I2P destination (b32.i2p address) to connect to
+/// * `is_testnet` - Whether this is a testnet connection
+/// * `samv3_port` - The SAMv3 port to use for I2P communication (default: 7656)
+/// * `timeout_secs` - Connection timeout in seconds (default: 5)
+///
+/// # Returns
+/// * `Result<(), SeedCheckError>` - Success or error with details
+pub async fn check_seed_health_i2p(
+	destination: &str,
+	is_testnet: bool,
+	samv3_port: Option<u16>,
+	timeout_secs: Option<u64>,
+) -> Result<(), SeedCheckError> {
+	let samv3_port = samv3_port.unwrap_or(7656);
+	let timeout_secs = timeout_secs.unwrap_or(5);
+
+	// Create I2P session
+	let mut session = Session::<style::Stream>::new(SessionOptions {
+		publish: false,
+		samv3_tcp_port: samv3_port,
+		nickname: format!(
+			"seedcheck-{}",
+			if is_testnet { "testnet" } else { "mainnet" }
+		),
+		num_inbound: 1,
+		num_outbound: 1,
+		..Default::default()
+	})
+	.await?;
+
+	// Attempt to connect to the destination
+	let connect_future = session.connect_detached_with_options(
+		destination,
+		StreamOptions {
+			dst_port: 0, // Use default port
+			..Default::default()
+		},
+	);
+
+	// Set up timeout
+	let timeout_duration = Duration::from_secs(timeout_secs);
+	let _timeout_future = tokio::time::sleep(timeout_duration);
+
+	// Race between connection and timeout
+	match tokio::time::timeout(timeout_duration, connect_future).await {
+		Ok(Ok(_stream)) => {
+			trace!(
+				"SUCCESS - Connected to I2P destination {} ({}net)",
+				destination,
+				if is_testnet { "test" } else { "main" }
+			);
+			Ok(())
+		}
+		Ok(Err(e)) => {
+			trace!(
+				"FAIL - Failed to connect to I2P destination {}: {:?}",
+				destination,
+				e
+			);
+			Err(e.into())
+		}
+		Err(_) => {
+			trace!(
+				"FAIL - Timeout connecting to I2P destination {} after {} seconds",
+				destination,
+				timeout_secs
+			);
+			Err(SeedCheckError::I2PError(format!(
+				"Connection timeout after {} seconds",
+				timeout_secs
+			)))
+		}
+	}
+}
+
+/// Check multiple I2P seeds for health
+///
+/// This function checks the health of multiple I2P seed destinations.
+///
+/// # Arguments
+/// * `destinations` - Vector of I2P destinations to check
+/// * `is_testnet` - Whether these are testnet destinations
+/// * `samv3_port` - The SAMv3 port to use for I2P communication
+///
+/// # Returns
+/// * `Vec<SeedCheckResult>` - Results for each destination
+pub async fn check_i2p_seeds(
+	destinations: Vec<String>,
+	is_testnet: bool,
+	samv3_port: Option<u16>,
+) -> Vec<SeedCheckResult> {
+	let mut result = vec![];
+
+	for destination in destinations.iter() {
+		warn!("Checking I2P seed health for {}", destination);
+		let mut seed_result = SeedCheckResult::default();
+		seed_result.url = destination.to_string();
+
+		// For I2P, we don't do DNS resolution, so we assume it's available
+		seed_result.dns_resolutions_found = true;
+
+		// Attempt to connect to the I2P destination
+		match check_seed_health_i2p(destination, is_testnet, samv3_port, Some(5)).await {
+			Ok(()) => {
+				warn!(
+					"SUCCESS - Connected to I2P seed {} ({})",
+					destination,
+					if is_testnet { "testnet" } else { "mainnet" }
+				);
+				seed_result.success = true;
+				seed_result
+					.successful_attempts
+					.push(SeedCheckConnectAttempt {
+						ip_addr: destination.clone(),
+						handshake_success: true,
+						user_agent: Some("I2P Connection".to_string()),
+						capabilities: Some("I2P Protocol".to_string()),
+					});
+			}
+			Err(e) => {
+				warn!(
+					"FAIL - Unable to connect to I2P seed {}: {:?}",
+					destination, e
+				);
+				seed_result
+					.unsuccessful_attempts
+					.push(SeedCheckConnectAttempt {
+						ip_addr: destination.clone(),
+						handshake_success: false,
+						user_agent: None,
+						capabilities: None,
+					});
+			}
+		}
+
+		result.push(seed_result);
+	}
+
+	result
+}
+
+/// Example function demonstrating how to use I2P seed checking
+///
+/// This function shows how to check the health of I2P seed destinations.
+/// You would typically call this from your main application.
+///
+/// # Arguments
+/// * `is_testnet` - Whether to check testnet or mainnet seeds
+/// * `samv3_port` - The SAMv3 port to use for I2P communication
+///
+/// # Returns
+/// * `Vec<SeedCheckResult>` - Results for each I2P destination
+pub async fn check_i2p_seeds_example(
+	is_testnet: bool,
+	samv3_port: Option<u16>,
+) -> Vec<SeedCheckResult> {
+	// Example I2P destinations - replace with actual Grin I2P seed destinations
+	let i2p_destinations = if is_testnet {
+		vec![
+			// Add your testnet I2P seed destinations here
+			// Example: "your-testnet-seed-1.b32.i2p".to_string(),
+			// Example: "your-testnet-seed-2.b32.i2p".to_string(),
+		]
+	} else {
+		vec![
+			// Add your mainnet I2P seed destinations here
+			// Example: "your-mainnet-seed-1.b32.i2p".to_string(),
+			// Example: "your-mainnet-seed-2.b32.i2p".to_string(),
+		]
+	};
+
+	if i2p_destinations.is_empty() {
+		warn!(
+			"No I2P destinations configured for {}net",
+			if is_testnet { "test" } else { "main" }
+		);
+		return vec![];
+	}
+
+	check_i2p_seeds(i2p_destinations, is_testnet, samv3_port).await
+}
+
+/// Combined seed checking function that checks both regular and I2P seeds
+///
+/// This function checks both regular DNS-based seeds and I2P seeds,
+/// providing a comprehensive view of seed health across different networks.
+///
+/// # Arguments
+/// * `is_testnet` - Whether to check testnet or mainnet seeds
+/// * `samv3_port` - The SAMv3 port to use for I2P communication
+/// * `i2p_destinations` - Optional list of I2P destinations to check
+///
+/// # Returns
+/// * `SeedCheckResults` - Combined results for both regular and I2P seeds
+pub async fn check_all_seeds(
+	is_testnet: bool,
+	samv3_port: Option<u16>,
+	i2p_destinations: Option<Vec<String>>,
+) -> SeedCheckResults {
+	let mut results = SeedCheckResults::default();
+
+	// Check regular DNS-based seeds
+	let regular_seeds = check_seeds(is_testnet);
+	if is_testnet {
+		results.testnet.extend(regular_seeds);
+	} else {
+		results.mainnet.extend(regular_seeds);
+	}
+
+	// Check I2P seeds if destinations are provided
+	if let Some(destinations) = i2p_destinations {
+		let i2p_seeds = check_i2p_seeds(destinations, is_testnet, samv3_port).await;
+		if is_testnet {
+			results.testnet.extend(i2p_seeds);
+		} else {
+			results.mainnet.extend(i2p_seeds);
+		}
+	}
+
+	results
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[tokio::test]
+	async fn test_check_seed_health_i2p_invalid_destination() {
+		// Test with an invalid destination - should fail gracefully
+		let result = check_seed_health_i2p("invalid-destination", false, Some(7656), Some(1)).await;
+		assert!(result.is_err());
+	}
+
+	#[tokio::test]
+	async fn test_check_i2p_seeds_empty_list() {
+		// Test with empty destinations list
+		let destinations = vec![];
+		let results = check_i2p_seeds(destinations, false, Some(7656)).await;
+		assert_eq!(results.len(), 0);
+	}
+
+	#[tokio::test]
+	async fn test_check_all_seeds_no_i2p() {
+		// Set global chain type for test
+		global::set_local_chain_type(global::ChainTypes::Mainnet);
+
+		// Test check_all_seeds without I2P destinations
+		let results = check_all_seeds(false, Some(7656), None).await;
+		// Should only contain regular seeds
+		assert_eq!(results.mainnet.len(), 0); // No regular seeds in test environment
+		assert_eq!(results.testnet.len(), 0);
+	}
+
+	#[test]
+	fn test_seed_check_error_i2p() {
+		// Test I2P error conversion
+		let error = SeedCheckError::I2PError("Test error".to_string());
+		assert_eq!(error.to_string(), "I2P Error Test error");
 	}
 }

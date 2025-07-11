@@ -25,14 +25,19 @@ use crate::{
 	},
 };
 
-use emissary_core::runtime::AddressBook;
+use emissary_core::{
+	crypto::{base32_encode, base64_decode},
+	primitives::Destination,
+	runtime::AddressBook,
+};
 use futures::{channel::oneshot, future::Either};
 use tokio::{
 	io::{AsyncReadExt, AsyncWriteExt},
 	net::{TcpListener, TcpStream},
 	task::JoinSet,
 };
-use yosemite::{style, Session, SessionOptions, StreamOptions};
+use tracing::warn;
+use yosemite::{style, DestinationKind, Session, SessionOptions, StreamOptions};
 
 use std::{sync::Arc, time::Duration};
 
@@ -81,6 +86,7 @@ impl HttpProxy {
 		samv3_tcp_port: u16,
 		http_proxy_ready_tx: Option<oneshot::Sender<()>>,
 		address_book_handle: Option<Arc<dyn AddressBook>>,
+		destination: DestinationKind,
 	) -> crate::Result<Self> {
 		tracing::info!(
 			target: LOG_TARGET,
@@ -90,19 +96,42 @@ impl HttpProxy {
 			"starting http proxy",
 		);
 
+		tracing::info!("xxxxxxxxxxx------------HttpProxy::new");
 		// create session before starting the tcp listener for the proxy
 		let session = Session::<style::Stream>::new(SessionOptions {
 			publish: false,
 			samv3_tcp_port,
 			nickname: "http-proxy".to_string(),
+			destination: destination,
 			..Default::default()
 		})
 		.await?;
+
+		tracing::info!("xxxxxxxxxxx------------HttpProxy::session created");
+		let destination = session.destination().to_owned();
+		if let Some(data) = base64_decode(destination) {
+			let destination = Destination::parse(data).unwrap();
+			let base32_address = base32_encode(destination.id().to_vec());
+			tracing::info!(
+				"xxxxxxxxxxx------------HttpProxy::session b32 {} connected",
+				base32_address
+			);
+			tracing::info!(
+				"xxxxxxxxxxx------------HttpProxy::session {} ",
+				session.destination().to_owned()
+			);
+		} else {
+			tracing::info!("xxxxxxxxxxx------------HttpProxy::session connected");
+		}
+		// let base32_address = base32_encode(destination.as_bytes());
+		// tracing::info!("xxxxxxxxxxx------------HttpProxy::session {} connected", base32_address);
 		let listener = TcpListener::bind(format!("{}:{}", config.host, config.port)).await?;
+		tracing::info!("xxxxxxxxxxx------------HttpProxy::listener created");
 
 		if let Some(tx) = http_proxy_ready_tx {
 			let _ = tx.send(());
 		}
+		tracing::info!("xxxxxxxxxxx------------HttpProxy::http_proxy_ready_tx sent");
 
 		// validate outproxy
 		//
@@ -155,6 +184,8 @@ impl HttpProxy {
 				}
 			}
 		};
+
+		tracing::info!("xxxxxxxxxxx------------HttpProxy::outproxy created");
 
 		Ok(Self {
 			address_book_handle,
@@ -256,6 +287,7 @@ impl HttpProxy {
 	/// Run event loop of [`HttpProxy`].
 	pub async fn run(mut self) -> anyhow::Result<()> {
 		loop {
+			warn!("xxxxxxxxxxx------------HttpProxy::run");
 			tokio::select! {
 				connection = self.listener.accept() => match connection {
 					Ok((stream, _)) => {
@@ -416,6 +448,7 @@ mod tests {
 			sam_port,
 			None,
 			None,
+			DestinationKind::Transient,
 		)
 		.await
 		.unwrap();
@@ -453,6 +486,7 @@ mod tests {
 			sam_port,
 			None,
 			None,
+			DestinationKind::Transient,
 		)
 		.await
 		.unwrap();
@@ -525,6 +559,7 @@ mod tests {
 			sam_port,
 			None,
 			Some(address_book),
+			DestinationKind::Transient,
 		)
 		.await
 		.unwrap();
@@ -577,6 +612,7 @@ mod tests {
 			sam_port,
 			None,
 			None,
+			DestinationKind::Transient,
 		)
 		.await
 		.unwrap();
@@ -629,6 +665,7 @@ mod tests {
 			sam_port,
 			None,
 			None,
+			DestinationKind::Transient,
 		)
 		.await
 		.unwrap();
@@ -701,6 +738,7 @@ mod tests {
 			sam_port,
 			None,
 			Some(address_book),
+			DestinationKind::Transient,
 		)
 		.await
 		.unwrap();
@@ -803,6 +841,7 @@ mod tests {
 				sam_port,
 				None,
 				Some(address_book.clone()),
+				DestinationKind::Transient,
 			)
 			.await
 			.unwrap();
@@ -824,6 +863,7 @@ mod tests {
 				sam_port,
 				None,
 				Some(address_book.clone()),
+				DestinationKind::Transient,
 			)
 			.await
 			.unwrap();
@@ -845,6 +885,7 @@ mod tests {
 				sam_port,
 				None,
 				Some(address_book.clone()),
+				DestinationKind::Transient,
 			)
 			.await
 			.unwrap();
@@ -866,6 +907,7 @@ mod tests {
 				sam_port,
 				None,
 				Some(address_book.clone()),
+				DestinationKind::Transient,
 			)
 			.await
 			.unwrap();
@@ -890,6 +932,7 @@ mod tests {
 				sam_port,
 				None,
 				Some(address_book.clone()),
+				DestinationKind::Transient,
 			)
 			.await
 			.unwrap();
@@ -914,6 +957,7 @@ mod tests {
 				sam_port,
 				None,
 				Some(address_book.clone()),
+				DestinationKind::Transient,
 			)
 			.await
 			.unwrap();
@@ -938,6 +982,7 @@ mod tests {
 				sam_port,
 				None,
 				Some(address_book.clone()),
+				DestinationKind::Transient,
 			)
 			.await
 			.unwrap();
@@ -961,6 +1006,7 @@ mod tests {
 				sam_port,
 				None,
 				Some(address_book.clone()),
+				DestinationKind::Transient,
 			)
 			.await
 			.unwrap();
