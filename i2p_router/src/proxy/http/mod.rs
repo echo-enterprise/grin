@@ -96,7 +96,6 @@ impl HttpProxy {
 			"starting http proxy",
 		);
 
-		tracing::info!("xxxxxxxxxxx------------HttpProxy::new");
 		// create session before starting the tcp listener for the proxy
 		let session = Session::<style::Stream>::new(SessionOptions {
 			publish: false,
@@ -107,31 +106,28 @@ impl HttpProxy {
 		})
 		.await?;
 
-		tracing::info!("xxxxxxxxxxx------------HttpProxy::session created");
+		// print the destination
 		let destination = session.destination().to_owned();
 		if let Some(data) = base64_decode(destination) {
 			let destination = Destination::parse(data).unwrap();
 			let base32_address = base32_encode(destination.id().to_vec());
 			tracing::info!(
-				"xxxxxxxxxxx------------HttpProxy::session b32 {} connected",
+				"----------------------HttpProxy::session {}.b32.i2p connected",
 				base32_address
 			);
 			tracing::info!(
-				"xxxxxxxxxxx------------HttpProxy::session {} ",
+				"----------------------HttpProxy::session destination key {} ",
 				session.destination().to_owned()
 			);
 		} else {
-			tracing::info!("xxxxxxxxxxx------------HttpProxy::session connected");
+			tracing::info!("----------------------HttpProxy::session connected");
 		}
-		// let base32_address = base32_encode(destination.as_bytes());
-		// tracing::info!("xxxxxxxxxxx------------HttpProxy::session {} connected", base32_address);
+
 		let listener = TcpListener::bind(format!("{}:{}", config.host, config.port)).await?;
-		tracing::info!("xxxxxxxxxxx------------HttpProxy::listener created");
 
 		if let Some(tx) = http_proxy_ready_tx {
 			let _ = tx.send(());
 		}
-		tracing::info!("xxxxxxxxxxx------------HttpProxy::http_proxy_ready_tx sent");
 
 		// validate outproxy
 		//
@@ -184,8 +180,6 @@ impl HttpProxy {
 				}
 			}
 		};
-
-		tracing::info!("xxxxxxxxxxx------------HttpProxy::outproxy created");
 
 		Ok(Self {
 			address_book_handle,
@@ -287,7 +281,6 @@ impl HttpProxy {
 	/// Run event loop of [`HttpProxy`].
 	pub async fn run(mut self) -> anyhow::Result<()> {
 		loop {
-			warn!("xxxxxxxxxxx------------HttpProxy::run");
 			tokio::select! {
 				connection = self.listener.accept() => match connection {
 					Ok((stream, _)) => {

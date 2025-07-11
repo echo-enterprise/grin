@@ -252,7 +252,6 @@ pub async fn setup_router() -> anyhow::Result<RouterContext> {
 				.await
 				{
 					Ok(proxy) => {
-						println!("xxxxxxxxxxx------------HttpProxy::session_created");
 						if let Err(error) = proxy.run().await {
 							tracing::debug!(
 								target: LOG_TARGET,

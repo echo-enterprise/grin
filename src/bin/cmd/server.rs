@@ -38,31 +38,30 @@ pub fn start_server(
 	logs_rx: Option<mpsc::Receiver<LogEntry>>,
 	api_chan: &'static mut (oneshot::Sender<()>, oneshot::Receiver<()>),
 ) {
-	warn!("start_server_123123123123");
 	// start i2p router here
 	if let Err(e) = start_i2p_router() {
 		warn!("Error starting i2p router: {}", e);
 		exit(1);
 	}
-	warn!("start_server_2222222222222");
+
 	// start grin server here
-	// start_server_tui(config, logs_rx, api_chan);
+	start_server_tui(config, logs_rx, api_chan);
 
 	// Infinite loop with Ctrl+C exit handling
-	let running = Arc::new(AtomicBool::new(true));
-	let r = running.clone();
-	ctrlc::set_handler(move || {
-		r.store(false, Ordering::SeqCst);
-	})
-	.expect("Error setting handler for both SIGINT (Ctrl+C) and SIGTERM (kill)");
+	// let running = Arc::new(AtomicBool::new(true));
+	// let r = running.clone();
+	// ctrlc::set_handler(move || {
+	// 	r.store(false, Ordering::SeqCst);
+	// })
+	// .expect("Error setting handler for both SIGINT (Ctrl+C) and SIGTERM (kill)");
 
-	warn!("Server running. Press Ctrl+C to exit.");
-	while running.load(Ordering::SeqCst) {
-		thread::sleep(Duration::from_secs(1));
-	}
-	warn!("Received SIGINT (Ctrl+C) or SIGTERM (kill). Shutting down...");
+	// warn!("Server running. Press Ctrl+C to exit.");
+	// while running.load(Ordering::SeqCst) {
+	// 	thread::sleep(Duration::from_secs(1));
+	// }
+	// warn!("Received SIGINT (Ctrl+C) or SIGTERM (kill). Shutting down...");
 
-	exit(0);
+	// exit(0);
 }
 
 fn start_server_tui(
